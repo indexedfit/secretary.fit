@@ -11,7 +11,7 @@ import { dirname, join } from 'path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const PORT = process.env.PORT || 3001
+const PORT = parseInt(process.env.PORT || '3001', 10)
 
 // Check for SSL certificates (for HTTPS/WSS support)
 const certPath = join(__dirname, '../../client/.cert/cert.pem')
