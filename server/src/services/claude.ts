@@ -107,12 +107,22 @@ class ClaudeAgentService {
           .map((c: any) => c.text)
           .join('\n')
 
+        // Extract tool uses for progress tracking
+        const toolUses = message.message.content
+          .filter((c: any) => c.type === 'tool_use')
+          .map((c: any) => ({
+            name: c.name,
+            id: c.id,
+            input: c.input
+          }))
+
         return {
           type: 'assistant',
           content: textContent,
           data: {
             session_id: message.session_id,
             uuid: message.uuid,
+            tool_uses: toolUses.length > 0 ? toolUses : undefined,
           },
         }
 

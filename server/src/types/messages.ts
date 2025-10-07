@@ -4,7 +4,7 @@ export interface ClientMessage {
 }
 
 export interface ServerMessage {
-  type: 'message' | 'error' | 'pong' | 'groq_response' | 'agent_assistant' | 'agent_result' | 'agent_system_init' | 'agent_system'
+  type: 'message' | 'error' | 'pong' | 'groq_response' | 'system_init' | 'agent_assistant' | 'agent_result' | 'agent_system_init' | 'agent_system'
   content?: string
   data?: any
 }

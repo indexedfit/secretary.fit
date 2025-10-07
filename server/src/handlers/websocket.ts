@@ -51,13 +51,37 @@ export function handleConnection(ws: WebSocket) {
     console.error('WebSocket error:', error)
   })
 
-  // Send welcome message
+  // Send welcome message with user ID
   ws.send(
     JSON.stringify({
-      type: 'message',
-      content: 'Connected to secretary.fit server',
+      type: 'system_init',
+      content: `Connected to secretary.fit`,
+      data: { userId },
     } as ServerMessage)
   )
+}
+
+/**
+ * Determine if Agent is needed based on user request
+ */
+function needsAgent(userMessage: string): boolean {
+  const lowerMessage = userMessage.toLowerCase()
+
+  // Keywords that indicate Agent is needed
+  const agentKeywords = [
+    'create', 'make', 'write', 'generate',  // File creation
+    'file', 'folder', 'directory',          // File operations
+    'read', 'open', 'show', 'display',      // File reading (sometimes)
+    'edit', 'modify', 'update', 'change',   // File editing
+    'delete', 'remove', 'rm',               // File deletion
+    'run', 'execute', 'bash', 'command',    // Code execution
+    'search', 'find', 'grep', 'look for',   // File search
+    'list', 'ls', 'show files',             // Directory listing
+    'install', 'npm', 'pip',                // Package management
+    'git', 'commit', 'push', 'pull',        // Git operations
+  ]
+
+  return agentKeywords.some(keyword => lowerMessage.includes(keyword))
 }
 
 async function handleUserMessage(ws: WebSocket, content: string) {
@@ -77,19 +101,21 @@ async function handleUserMessage(ws: WebSocket, content: string) {
       } as ServerMessage)
     )
 
-    // Step 2: Claude Agent processes in background (streaming)
-    for await (const agentMsg of claudeAgentService.executeAgent(session.userId, content, {
-      sessionId: session.sessionId,
-    })) {
-      ws.send(JSON.stringify({
-        type: 'agent_' + agentMsg.type,
-        content: agentMsg.content,
-        data: agentMsg.data,
-      }))
+    // Step 2: Only run Agent if needed (for file ops, code execution, etc.)
+    if (needsAgent(content)) {
+      for await (const agentMsg of claudeAgentService.executeAgent(session.userId, content, {
+        sessionId: session.sessionId,
+      })) {
+        ws.send(JSON.stringify({
+          type: 'agent_' + agentMsg.type,
+          content: agentMsg.content,
+          data: agentMsg.data,
+        }))
 
-      // Store session ID for conversation continuity
-      if (agentMsg.data?.session_id) {
-        session.sessionId = agentMsg.data.session_id
+        // Store session ID for conversation continuity
+        if (agentMsg.data?.session_id) {
+          session.sessionId = agentMsg.data.session_id
+        }
       }
     }
   } catch (error) {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
@@ -17,45 +17,76 @@ interface FileInfo {
 
 function App() {
   const [message, setMessage] = useState('')
-  const [conversation, setConversation] = useState<Message[]>([])
-  const [files, setFiles] = useState<FileInfo[]>([])
+  const [conversation, setConversation] = useState<Message[]>(() => {
+    // Load conversation from localStorage on mount
+    const saved = localStorage.getItem('secretary-conversation')
+    return saved ? JSON.parse(saved) : []
+  })
+  const [files, setFiles] = useState<FileInfo[]>(() => {
+    // Load files from localStorage on mount
+    const saved = localStorage.getItem('secretary-files')
+    return saved ? JSON.parse(saved) : []
+  })
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
   const [agentStatus, setAgentStatus] = useState<string>('')
+
+  // Save conversation to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('secretary-conversation', JSON.stringify(conversation))
+  }, [conversation])
+
+  // Save files to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('secretary-files', JSON.stringify(files))
+  }, [files])
 
   const { sendMessage, isConnected } = useWebSocket({
     url: 'ws://localhost:3001',
     onMessage: (data) => {
       // Handle different message types
-      if (data.type === 'groq_response') {
+      if (data.type === 'system_init') {
+        // Just connection message, don't display
+        return
+      } else if (data.type === 'groq_response') {
         // GROQ's immediate response
-        setConversation(prev => [...prev, {
-          role: 'assistant',
-          content: data.content,
-          type: 'groq'
-        }])
-        speak(data.content)
+        if (data.content && data.content.trim()) {
+          setConversation(prev => [...prev, {
+            role: 'assistant',
+            content: data.content,
+            type: 'groq'
+          }])
+          speak(data.content)
+        }
       } else if (data.type === 'agent_assistant') {
-        // Agent's actual response
-        setConversation(prev => [...prev, {
-          role: 'agent',
-          content: data.content,
-          type: 'agent_thinking'
-        }])
-        setAgentStatus('Processing...')
+        // Show tool uses as progress indicators
+        if (data.data?.tool_uses && data.data.tool_uses.length > 0) {
+          const toolNames = data.data.tool_uses.map((t: any) => {
+            const icon =
+              t.name === 'Write' ? '✏️' :
+              t.name === 'Read' ? '📖' :
+              t.name === 'Bash' ? '⚙️' :
+              t.name === 'Edit' ? '✏️' :
+              t.name === 'Glob' ? '🔍' :
+              t.name === 'Grep' ? '🔎' : '🔧'
+            return `${icon} ${t.name}`
+          }).join(', ')
+          setAgentStatus(toolNames)
+        }
 
-        // Extract file operations from agent messages
+        // Only show assistant messages if they have unique content (avoid duplicates with result)
+        // Skip for now - we'll show in result
         extractFileInfo(data.content)
       } else if (data.type === 'agent_result') {
         // Final result from agent
-        setConversation(prev => [...prev, {
-          role: 'agent',
-          content: data.content,
-          type: 'agent_result'
-        }])
-        setAgentStatus('')
-
-        // Extract file info from result
-        extractFileInfo(data.content)
+        if (data.content && data.content.trim()) {
+          setConversation(prev => [...prev, {
+            role: 'agent',
+            content: data.content,
+            type: 'agent_result'
+          }])
+          setAgentStatus('')
+          extractFileInfo(data.content)
+        }
       } else if (data.type === 'message') {
         // Fallback for generic messages
         setConversation(prev => [...prev, {
@@ -75,25 +106,41 @@ function App() {
   })
 
   const extractFileInfo = (content: string) => {
-    // Extract file contents from messages (basic parsing)
-    // Look for patterns like "created file X" or "content: ..."
-    const fileCreatedMatch = content.match(/created?\s+(?:file|a file)\s+(?:named\s+)?['"]?([^'":\s]+)['"]?/i)
+    if (!content) return
+
+    // Extract file operations from messages
+    // Match patterns: "created hello.txt", "Created test.txt", "Done! Created test.txt"
+    const fileCreatedMatch = content.match(/(?:created?|made|wrote)\s+(?:file\s+)?(?:named\s+)?[`'"]?([a-zA-Z0-9_.-]+\.(?:txt|js|ts|json|md|py|html|css|sh|yml|yaml))[`'"]?/i)
+
     if (fileCreatedMatch) {
       const fileName = fileCreatedMatch[1]
-      if (!files.find(f => f.name === fileName)) {
-        setFiles(prev => [...prev, { name: fileName, content: '[File created]' }])
-      }
+
+      // Use functional update to prevent race conditions
+      setFiles(prev => {
+        if (prev.find(f => f.name === fileName)) {
+          return prev // Already exists
+        }
+        return [...prev, { name: fileName, content: '[File created - click to load]' }]
+      })
     }
 
-    // Extract file read content
-    const fileContentMatch = content.match(/(?:content|contains?):\s*['"]?([^'"]+)['"]?/i)
-    if (fileContentMatch && files.length > 0) {
-      const lastFile = files[files.length - 1]
-      setFiles(prev => prev.map(f =>
-        f.name === lastFile.name
-          ? { ...f, content: fileContentMatch[1] }
-          : f
-      ))
+    // Extract file content: with "Hello World" or with content "..."
+    const contentMatch = content.match(/with\s+(?:the\s+)?(?:content\s+)?[`'"]([^`'"]+)[`'"]/i)
+    if (contentMatch) {
+      setFiles(prev => {
+        if (prev.length === 0) return prev
+
+        const lastFile = prev[prev.length - 1]
+        if (lastFile.content === contentMatch[1]) {
+          return prev // Content unchanged
+        }
+
+        return prev.map(f =>
+          f.name === lastFile.name
+            ? { ...f, content: contentMatch[1] }
+            : f
+        )
+      })
     }
   }
 
@@ -113,6 +160,16 @@ function App() {
     }
   }
 
+  const handleClearAll = () => {
+    if (confirm('Clear all conversation history and files?')) {
+      setConversation([])
+      setFiles([])
+      setSelectedFile(null)
+      localStorage.removeItem('secretary-conversation')
+      localStorage.removeItem('secretary-files')
+    }
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -122,7 +179,23 @@ function App() {
       {/* Main Chat Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '2rem' }}>
         <div style={{ marginBottom: '1rem' }}>
-          <h1 style={{ margin: 0, marginBottom: '0.5rem' }}>secretary.fit</h1>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <h1 style={{ margin: 0 }}>secretary.fit</h1>
+            <button
+              onClick={handleClearAll}
+              style={{
+                padding: '0.5rem 1rem',
+                fontSize: '0.75rem',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              🗑️ Clear All
+            </button>
+          </div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <span style={{
               display: 'inline-flex',
@@ -146,6 +219,14 @@ function App() {
                 fontWeight: 500
               }}>
                 🤖 {agentStatus}
+              </span>
+            )}
+            {conversation.length > 0 && (
+              <span style={{
+                fontSize: '0.75rem',
+                color: '#999'
+              }}>
+                💾 Auto-saved
               </span>
             )}
           </div>
