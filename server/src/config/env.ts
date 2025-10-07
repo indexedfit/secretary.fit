@@ -15,6 +15,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   groqApiKey: process.env.GROQ_API_KEY,
+  elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
 }
 
@@ -27,8 +28,13 @@ if (!config.groqApiKey) {
   console.warn('⚠️  GROQ_API_KEY not set in .env')
 }
 
+if (!config.elevenLabsApiKey) {
+  console.warn('⚠️  ELEVENLABS_API_KEY not set in .env')
+}
+
 console.log('✅ Environment loaded:', {
   port: config.port,
   hasAnthropicKey: !!config.anthropicApiKey,
   hasGroqKey: !!config.groqApiKey,
+  hasElevenLabsKey: !!config.elevenLabsApiKey,
 })

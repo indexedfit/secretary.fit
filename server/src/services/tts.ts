@@ -1,31 +1,28 @@
 // Load env FIRST
 import '../config/env.js'
-import OpenAI from 'openai'
+import { ElevenLabsClient } from 'elevenlabs'
 
 class TTSService {
-  private client: OpenAI | null = null
+  private client: ElevenLabsClient | null = null
 
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY
+    const apiKey = process.env.ELEVENLABS_API_KEY
 
     if (!apiKey) {
-      console.warn('OPENAI_API_KEY not set - TTS service will not be available')
-      console.warn('Note: We can switch to Kokoro TTS (free, local) later')
+      console.warn('⚠️  ELEVENLABS_API_KEY not set - TTS will not be available')
       return
     }
 
-    this.client = new OpenAI({
+    this.client = new ElevenLabsClient({
       apiKey,
     })
+
+    console.log('✅ ElevenLabs TTS configured')
   }
 
-  /**
-   * Convert text to speech using OpenAI TTS
-   * Returns audio as Buffer (MP3 format)
-   */
-  async synthesize(text: string, voice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' = 'nova'): Promise<Buffer> {
+  async synthesize(text: string, voiceId: string = 'EXAVITQu4vr4xnSDxMaL'): Promise<Buffer> {
     if (!this.client) {
-      throw new Error('TTS client not initialized - check your OPENAI_API_KEY')
+      throw new Error('ElevenLabs client not initialized - check ELEVENLABS_API_KEY')
     }
 
     if (!text || text.trim().length === 0) {
@@ -33,20 +30,26 @@ class TTSService {
     }
 
     try {
-      const mp3 = await this.client.audio.speech.create({
-        model: 'tts-1', // Fast model, use 'tts-1-hd' for higher quality
-        voice: voice,
-        input: text,
-        speed: 1.0, // Can be 0.25 to 4.0
+      console.log(`🔊 Generating ElevenLabs TTS: "${text.substring(0, 50)}..."`)
+
+      const audio = await this.client.generate({
+        voice: voiceId, // Default: Sarah (female, conversational)
+        text: text,
+        model_id: 'eleven_monolingual_v1',
       })
 
-      // Convert response to Buffer
-      const buffer = Buffer.from(await mp3.arrayBuffer())
-      console.log(`Generated ${buffer.length} bytes of audio for: "${text.substring(0, 50)}..."`)
+      // Convert stream to buffer
+      const chunks: Buffer[] = []
+      for await (const chunk of audio) {
+        chunks.push(chunk)
+      }
+
+      const buffer = Buffer.concat(chunks)
+      console.log(`✅ Generated ${buffer.length} bytes of audio`)
 
       return buffer
     } catch (error) {
-      console.error('TTS synthesis error:', error)
+      console.error('❌ ElevenLabs TTS error:', error)
       throw error
     }
   }

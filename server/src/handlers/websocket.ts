@@ -2,6 +2,7 @@ import { WebSocket } from 'ws'
 import { claudeAgentService } from '../services/claude.js'
 import { groqService } from '../services/groq.js'
 import { whisperService } from '../services/whisper.js'
+import { ttsService } from '../services/tts.js'
 import type { ClientMessage, ServerMessage } from '../types/messages.js'
 import { randomUUID } from 'crypto'
 
@@ -203,6 +204,22 @@ async function handleUserMessage(ws: WebSocket, content: string) {
         content: groqResponse,
       } as ServerMessage)
     )
+
+    // Step 1.5: Generate TTS audio with ElevenLabs
+    try {
+      const audioBuffer = await ttsService.synthesize(groqResponse)
+
+      // Send audio as base64
+      ws.send(
+        JSON.stringify({
+          type: 'tts_audio',
+          data: audioBuffer.toString('base64'),
+        } as ServerMessage)
+      )
+    } catch (ttsError) {
+      console.error('⚠️  TTS error (continuing anyway):', ttsError)
+      // Don't fail the whole request if TTS fails
+    }
 
     // Step 2: Only run Agent if needed (for file ops, code execution, etc.)
     if (needsAgent(content)) {

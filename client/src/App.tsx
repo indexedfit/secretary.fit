@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
-import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { useAudioRecording } from './hooks/useAudioRecording'
 import { useAudioPlayback } from './hooks/useAudioPlayback'
 
@@ -58,12 +57,13 @@ function App() {
       } else if (data.type === 'groq_response') {
         // GROQ's immediate response
         if (data.content && data.content.trim()) {
+          console.log(`📨 GROQ response received`)
           setConversation(prev => [...prev, {
             role: 'assistant',
             content: data.content,
             type: 'groq'
           }])
-          speak(data.content)
+          // TTS audio will come separately
         }
       } else if (data.type === 'agent_assistant') {
         // Show tool uses as progress indicators
@@ -100,38 +100,34 @@ function App() {
         if (data.content) {
           setTranscribedText(data.content)
           setMessage(data.content)
-          console.log('Transcription received:', data.content)
+          console.log('✅ Transcription:', data.content)
         }
       } else if (data.type === 'tts_audio') {
-        // Server-generated TTS audio (future)
-        if (data.audioData) {
-          playAudio(data.audioData)
+        // Server-generated TTS audio - comes as base64
+        if (data.data) {
+          console.log('🔊 Received TTS audio, playing...')
+          // Convert base64 to ArrayBuffer
+          const binaryString = atob(data.data)
+          const bytes = new Uint8Array(binaryString.length)
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i)
+          }
+          playAudio(bytes.buffer)
         }
-      } else if (data.type === 'message') {
-        // Fallback for generic messages
-        setConversation(prev => [...prev, {
-          role: 'assistant',
-          content: data.content
-        }])
-        speak(data.content)
       }
     },
   })
 
-  const { speak, speaking } = useSpeechSynthesis()
+  // Audio playback for server-generated TTS
+  const { playAudio, isPlaying: isSpeaking } = useAudioPlayback()
 
-  // New Whisper-based audio recording
+  // Whisper-based audio recording
   const { isRecording, startRecording, stopRecording } = useAudioRecording({
     onDataAvailable: (audioBlob) => {
-      // Only send audio chunk to server if actually recording
-      console.log(`📦 Sending audio chunk: ${audioBlob.size} bytes`)
       sendBinary(audioBlob)
     },
-    chunkInterval: 100, // Send chunks every 100ms
+    chunkInterval: 100,
   })
-
-  // Audio playback for server-generated TTS
-  const { playAudio } = useAudioPlayback()
 
   const extractFileInfo = (content: string) => {
     if (!content) return
@@ -304,6 +300,7 @@ function App() {
               <div>{msg.content}</div>
             </div>
           ))}
+          <div ref={conversationEndRef} />
         </div>
 
         {/* Input Area */}
@@ -320,7 +317,7 @@ function App() {
             </div>
           )}
 
-          {speaking && (
+          {isSpeaking && (
             <div style={{
               marginBottom: '0.5rem',
               padding: '0.5rem',
