@@ -181,6 +181,10 @@ function App() {
               : f
           ))
         }
+      } else if (data.type === 'tts_error') {
+        // TTS failed - reset voice state so UI isn't stuck
+        console.warn('⚠️ TTS error:', data.content)
+        voiceState.reset()
       }
     },
   })
@@ -279,6 +283,9 @@ function App() {
   }
 
   const handleVoiceInput = () => {
+    // Unlock audio on every interaction (critical for iOS Safari)
+    unlockAudio()
+
     // Handle interruption during speaking or agent work
     if (voiceState.canInterrupt()) {
       stopAudio()

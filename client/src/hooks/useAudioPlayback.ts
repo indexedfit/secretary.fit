@@ -58,6 +58,21 @@ export function useAudioPlayback() {
   }, [initAudioContext])
 
   /**
+   * Stop currently playing audio
+   */
+  const stop = useCallback(() => {
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop()
+      } catch (error) {
+        // Ignore errors if already stopped
+      }
+      currentSourceRef.current = null
+    }
+    setIsPlaying(false)
+  }, [])
+
+  /**
    * Play audio from ArrayBuffer
    */
   const playAudio = useCallback(async (audioData: ArrayBuffer) => {
@@ -69,20 +84,28 @@ export function useAudioPlayback() {
         throw new Error('AudioContext not available')
       }
 
-      // Resume context if suspended (required by iOS Safari)
-      if (audioContextRef.current.state === 'suspended') {
-        console.log('AudioContext suspended, resuming...')
+      console.log(`AudioContext state before resume: ${audioContextRef.current.state}`)
+
+      // ALWAYS resume context on iOS Safari - this is critical
+      if (audioContextRef.current.state !== 'running') {
+        console.log('AudioContext not running, resuming...')
         await audioContextRef.current.resume()
-        console.log('AudioContext resumed:', audioContextRef.current.state)
+        console.log(`AudioContext after resume: ${audioContextRef.current.state}`)
       }
 
       // Decode audio data
       console.log(`🎵 Decoding audio: ${audioData.byteLength} bytes`)
       const audioBuffer = await audioContextRef.current.decodeAudioData(audioData)
-      console.log(`✅ Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels`)
+      console.log(`✅ Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels, sample rate: ${audioBuffer.sampleRate}`)
 
       // Stop any currently playing audio
       stop()
+
+      // Resume AGAIN right before playing (iOS Safari workaround)
+      if (audioContextRef.current.state !== 'running') {
+        await audioContextRef.current.resume()
+        console.log('Final resume before play')
+      }
 
       // Create and configure source
       const source = audioContextRef.current.createBufferSource()
@@ -98,11 +121,13 @@ export function useAudioPlayback() {
 
       // Track when playback ends
       source.onended = () => {
+        console.log('Audio playback ended')
         setIsPlaying(false)
         currentSourceRef.current = null
       }
 
       // Start playback
+      console.log(`Starting playback NOW - context state: ${audioContextRef.current.state}`)
       source.start(0)
       currentSourceRef.current = source
       setIsPlaying(true)
@@ -113,7 +138,7 @@ export function useAudioPlayback() {
       setIsPlaying(false)
       throw error
     }
-  }, [initAudioContext])
+  }, [unlockAudio, stop])
 
   /**
    * Play audio from Blob
@@ -122,21 +147,6 @@ export function useAudioPlayback() {
     const arrayBuffer = await blob.arrayBuffer()
     return playAudio(arrayBuffer)
   }, [playAudio])
-
-  /**
-   * Stop currently playing audio
-   */
-  const stop = useCallback(() => {
-    if (currentSourceRef.current) {
-      try {
-        currentSourceRef.current.stop()
-      } catch (error) {
-        // Ignore errors if already stopped
-      }
-      currentSourceRef.current = null
-    }
-    setIsPlaying(false)
-  }, [])
 
   /**
    * Cleanup audio context
