@@ -45,15 +45,8 @@ export function useWebSocket({
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          // Handle both 'message' and 'groq_response' types
-          if (data.type === 'message' || data.type === 'groq_response') {
-            onMessage?.(data)
-          } else if (data.type.startsWith('agent_')) {
-            // Agent streaming messages
-            onMessage?.(data)
-          } else {
-            console.log('Received message:', data)
-          }
+          // Pass ALL message types to the handler
+          onMessage?.(data)
         } catch (error) {
           console.error('Failed to parse message:', error)
         }
@@ -86,8 +79,17 @@ export function useWebSocket({
     }
   }
 
+  const sendBinary = (data: Blob | ArrayBuffer) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(data)
+    } else {
+      console.error('WebSocket is not connected')
+    }
+  }
+
   return {
     isConnected,
     sendMessage,
+    sendBinary,
   }
 }

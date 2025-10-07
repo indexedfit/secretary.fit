@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
-import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
+import { useAudioRecording } from './hooks/useAudioRecording'
+import { useAudioPlayback } from './hooks/useAudioPlayback'
 
 interface Message {
   role: 'user' | 'assistant' | 'agent'
@@ -29,10 +30,17 @@ function App() {
   })
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
   const [agentStatus, setAgentStatus] = useState<string>('')
+  const [transcribedText, setTranscribedText] = useState<string>('')
+  const conversationEndRef = useRef<HTMLDivElement>(null)
 
   // Save conversation to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('secretary-conversation', JSON.stringify(conversation))
+  }, [conversation])
+
+  // Auto-scroll to bottom when conversation updates
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [conversation])
 
   // Save files to localStorage whenever they change
@@ -40,7 +48,7 @@ function App() {
     localStorage.setItem('secretary-files', JSON.stringify(files))
   }, [files])
 
-  const { sendMessage, isConnected } = useWebSocket({
+  const { sendMessage, sendBinary, isConnected } = useWebSocket({
     url: 'ws://localhost:3001',
     onMessage: (data) => {
       // Handle different message types
@@ -87,6 +95,18 @@ function App() {
           setAgentStatus('')
           extractFileInfo(data.content)
         }
+      } else if (data.type === 'transcription') {
+        // Whisper transcription result
+        if (data.content) {
+          setTranscribedText(data.content)
+          setMessage(data.content)
+          console.log('Transcription received:', data.content)
+        }
+      } else if (data.type === 'tts_audio') {
+        // Server-generated TTS audio (future)
+        if (data.audioData) {
+          playAudio(data.audioData)
+        }
       } else if (data.type === 'message') {
         // Fallback for generic messages
         setConversation(prev => [...prev, {
@@ -98,12 +118,20 @@ function App() {
     },
   })
 
-  const { speak, speaking, voices } = useSpeechSynthesis()
-  const { listening, transcript, startListening, stopListening } = useSpeechRecognition({
-    onResult: (text) => {
-      setMessage(text)
+  const { speak, speaking } = useSpeechSynthesis()
+
+  // New Whisper-based audio recording
+  const { isRecording, startRecording, stopRecording } = useAudioRecording({
+    onDataAvailable: (audioBlob) => {
+      // Only send audio chunk to server if actually recording
+      console.log(`📦 Sending audio chunk: ${audioBlob.size} bytes`)
+      sendBinary(audioBlob)
     },
+    chunkInterval: 100, // Send chunks every 100ms
   })
+
+  // Audio playback for server-generated TTS
+  const { playAudio } = useAudioPlayback()
 
   const extractFileInfo = (content: string) => {
     if (!content) return
@@ -153,10 +181,16 @@ function App() {
   }
 
   const handleVoiceInput = () => {
-    if (listening) {
-      stopListening()
+    // Use Whisper-based recording
+    if (isRecording) {
+      stopRecording()
+      // Send end signal to trigger transcription
+      sendMessage({ type: 'audio_end' })
     } else {
-      startListening()
+      setTranscribedText('')
+      // Send start signal
+      sendMessage({ type: 'audio_start' })
+      startRecording()
     }
   }
 
@@ -274,7 +308,7 @@ function App() {
 
         {/* Input Area */}
         <div>
-          {listening && (
+          {isRecording && (
             <div style={{
               marginBottom: '0.5rem',
               padding: '0.5rem',
@@ -282,7 +316,7 @@ function App() {
               borderRadius: '4px',
               fontSize: '0.875rem'
             }}>
-              🎤 Listening... {transcript}
+              🎤 Recording (Whisper)...
             </div>
           )}
 
@@ -313,12 +347,12 @@ function App() {
             <button
               onClick={handleVoiceInput}
               style={{
-                backgroundColor: listening ? '#f44336' : '#4CAF50',
+                backgroundColor: isRecording ? '#f44336' : '#4CAF50',
                 color: 'white',
-                minWidth: '80px'
+                minWidth: '100px'
               }}
             >
-              {listening ? '🎤 Stop' : '🎤 Talk'}
+              {isRecording ? '🎤 Stop' : '🎙️ Record'}
             </button>
           </div>
 
@@ -327,7 +361,7 @@ function App() {
             fontSize: '0.75rem',
             color: '#666'
           }}>
-            Available voices: {voices.length} | Transcript: {transcript || 'None'}
+            🎙️ Whisper STT (Groq) | Last transcription: {transcribedText || 'None'}
           </div>
         </div>
       </div>
