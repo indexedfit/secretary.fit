@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 interface UseWebSocketOptions {
   url: string
   onMessage?: (data: any) => void
+  onConnect?: () => void
   onError?: (error: Event) => void
   reconnectInterval?: number
 }
@@ -10,6 +11,7 @@ interface UseWebSocketOptions {
 export function useWebSocket({
   url,
   onMessage,
+  onConnect,
   onError,
   reconnectInterval = 3000
 }: UseWebSocketOptions) {
@@ -24,6 +26,7 @@ export function useWebSocket({
       ws.onopen = () => {
         console.log('WebSocket connected')
         setIsConnected(true)
+        onConnect?.()
       }
 
       ws.onclose = () => {
@@ -81,9 +84,11 @@ export function useWebSocket({
 
   const sendBinary = (data: Blob | ArrayBuffer) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const size = data instanceof Blob ? data.size : data.byteLength
+      console.log(`🔌 Sending binary data: ${size} bytes`)
       wsRef.current.send(data)
     } else {
-      console.error('WebSocket is not connected')
+      console.error('❌ WebSocket is not connected, cannot send binary data')
     }
   }
 

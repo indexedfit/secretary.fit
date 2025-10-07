@@ -33,18 +33,31 @@ export function useAudioRecording({
 
       streamRef.current = stream
 
-      // Try to use webm format (widely supported)
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/mp4' // Fallback
+      // Try different formats (iOS Safari needs mp4)
+      let mimeType = 'audio/webm'
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm'
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+      } else {
+        // iOS Safari fallback - no mimeType specified
+        mimeType = ''
+      }
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType,
-      })
+      console.log(`🎙️ Using mimeType: ${mimeType || '(default)'}`)
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
 
       mediaRecorder.ondataavailable = (event) => {
+        console.log(`📦 Audio chunk received: ${event.data.size} bytes, type: ${event.data.type}`)
         if (event.data.size > 0) {
           onDataAvailable?.(event.data)
+        } else {
+          console.warn('⚠️ Empty audio chunk received')
         }
       }
 
@@ -58,7 +71,8 @@ export function useAudioRecording({
       mediaRecorderRef.current = mediaRecorder
       setIsRecording(true)
 
-      console.log(`Recording started with ${mimeType}`)
+      console.log(`✅ Recording started with ${mimeType || '(default)'}, sending chunks every ${chunkInterval}ms`)
+      console.log(`MediaRecorder state: ${mediaRecorder.state}`)
     } catch (error) {
       console.error('Failed to start recording:', error)
       setIsRecording(false)

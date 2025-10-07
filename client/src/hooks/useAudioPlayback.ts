@@ -6,6 +6,7 @@ export function useAudioPlayback() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
+  const isUnlockedRef = useRef(false)
 
   /**
    * Initialize AudioContext (must be done after user interaction)
@@ -19,6 +20,8 @@ export function useAudioPlayback() {
         analyserRef.current = audioContextRef.current.createAnalyser()
         analyserRef.current.fftSize = 256
         analyserRef.current.smoothingTimeConstant = 0.8
+
+        console.log('AudioContext initialized:', audioContextRef.current.state)
       } catch (error) {
         console.error('Failed to initialize AudioContext:', error)
         setIsSupported(false)
@@ -27,24 +30,56 @@ export function useAudioPlayback() {
   }, [])
 
   /**
+   * Unlock audio on iOS Safari (requires user interaction)
+   */
+  const unlockAudio = useCallback(async () => {
+    if (isUnlockedRef.current) return
+
+    initAudioContext()
+
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      try {
+        // Play a silent buffer to unlock audio on iOS
+        const buffer = audioContextRef.current.createBuffer(1, 1, 22050)
+        const source = audioContextRef.current.createBufferSource()
+        source.buffer = buffer
+        source.connect(audioContextRef.current.destination)
+        source.start(0)
+
+        await audioContextRef.current.resume()
+        isUnlockedRef.current = true
+        console.log('Audio unlocked for iOS')
+      } catch (error) {
+        console.error('Failed to unlock audio:', error)
+      }
+    } else {
+      isUnlockedRef.current = true
+    }
+  }, [initAudioContext])
+
+  /**
    * Play audio from ArrayBuffer
    */
   const playAudio = useCallback(async (audioData: ArrayBuffer) => {
     try {
-      // Initialize context if needed
-      initAudioContext()
+      // Unlock audio on first interaction (iOS Safari)
+      await unlockAudio()
 
       if (!audioContextRef.current) {
         throw new Error('AudioContext not available')
       }
 
-      // Resume context if suspended (required by some browsers)
+      // Resume context if suspended (required by iOS Safari)
       if (audioContextRef.current.state === 'suspended') {
+        console.log('AudioContext suspended, resuming...')
         await audioContextRef.current.resume()
+        console.log('AudioContext resumed:', audioContextRef.current.state)
       }
 
       // Decode audio data
+      console.log(`🎵 Decoding audio: ${audioData.byteLength} bytes`)
       const audioBuffer = await audioContextRef.current.decodeAudioData(audioData)
+      console.log(`✅ Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels`)
 
       // Stop any currently playing audio
       stop()
@@ -137,5 +172,6 @@ export function useAudioPlayback() {
     cleanup,
     getAudioContext,
     getAnalyser,
+    unlockAudio,
   }
 }

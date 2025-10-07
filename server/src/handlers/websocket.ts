@@ -5,6 +5,8 @@ import { whisperService } from '../services/whisper.js'
 import { ttsService } from '../services/tts.js'
 import type { ClientMessage, ServerMessage } from '../types/messages.js'
 import { randomUUID } from 'crypto'
+import { promises as fs } from 'fs'
+import path from 'path'
 
 // Store user sessions by WebSocket connection
 const userSessions = new WeakMap<WebSocket, {
@@ -14,11 +16,11 @@ const userSessions = new WeakMap<WebSocket, {
 }>()
 
 export function handleConnection(ws: WebSocket) {
-  // Generate unique user ID for this connection
-  const userId = randomUUID()
-  userSessions.set(ws, { userId, audioChunks: [] })
+  // Start with temporary ID, will be replaced when client sends 'identify' message
+  const tempUserId = randomUUID()
+  userSessions.set(ws, { userId: tempUserId, audioChunks: [] })
 
-  console.log(`Client connected: ${userId}`)
+  console.log(`Client connected (temp ID): ${tempUserId}`)
 
   ws.on('message', async (data) => {
     try {
@@ -30,6 +32,24 @@ export function handleConnection(ws: WebSocket) {
         console.log(`📨 [Message] Type: ${message.type}, Content: ${message.content?.substring(0, 50) || 'N/A'}`)
 
         switch (message.type) {
+          case 'identify':
+            // Client sends persistent user ID for workspace continuity
+            if (message.userId) {
+              const session = userSessions.get(ws)
+              if (session) {
+                session.userId = message.userId
+                console.log(`✅ Client identified with user ID: ${message.userId}`)
+              }
+            }
+            break
+
+          case 'fetch_file':
+            // Client requests actual file content from workspace
+            if (message.content) {
+              await handleFetchFile(ws, message.content)
+            }
+            break
+
           case 'message':
             if (message.content) {
               console.log(`💬 Processing text message: "${message.content}"`)
@@ -71,19 +91,19 @@ export function handleConnection(ws: WebSocket) {
   })
 
   ws.on('close', () => {
-    console.log(`Client disconnected: ${userId}`)
+    const session = userSessions.get(ws)
+    console.log(`Client disconnected: ${session?.userId || 'unknown'}`)
   })
 
   ws.on('error', (error) => {
     console.error('WebSocket error:', error)
   })
 
-  // Send welcome message with user ID
+  // Send welcome message (user ID will be set when client sends 'identify')
   ws.send(
     JSON.stringify({
       type: 'system_init',
       content: `Connected to secretary.fit`,
-      data: { userId },
     } as ServerMessage)
   )
 }
@@ -96,19 +116,64 @@ function needsAgent(userMessage: string): boolean {
 
   // Keywords that indicate Agent is needed
   const agentKeywords = [
-    'create', 'make', 'write', 'generate',  // File creation
-    'file', 'folder', 'directory',          // File operations
-    'read', 'open', 'show', 'display',      // File reading (sometimes)
-    'edit', 'modify', 'update', 'change',   // File editing
-    'delete', 'remove', 'rm',               // File deletion
-    'run', 'execute', 'bash', 'command',    // Code execution
-    'search', 'find', 'grep', 'look for',   // File search
-    'list', 'ls', 'show files',             // Directory listing
-    'install', 'npm', 'pip',                // Package management
-    'git', 'commit', 'push', 'pull',        // Git operations
+    'create', 'make', 'write', 'generate',      // File creation
+    'file', 'folder', 'directory',              // File operations
+    'read', 'open', 'show', 'display',          // File reading
+    'edit', 'modify', 'update', 'change',       // File editing
+    'add', 'append', 'insert', 'put',           // Adding content
+    'delete', 'remove', 'rm',                   // File deletion
+    'run', 'execute', 'bash', 'command',        // Code execution
+    'search', 'find', 'grep', 'look for',       // File search
+    'list', 'ls', 'show files',                 // Directory listing
+    'install', 'npm', 'pip',                    // Package management
+    'git', 'commit', 'push', 'pull',            // Git operations
+    '.txt', '.js', '.py', '.json', '.md',       // File extensions
   ]
 
   return agentKeywords.some(keyword => lowerMessage.includes(keyword))
+}
+
+/**
+ * Fetch actual file content from user's workspace
+ */
+async function handleFetchFile(ws: WebSocket, fileName: string) {
+  const session = userSessions.get(ws)
+  if (!session) {
+    console.error('❌ Session not found!')
+    return
+  }
+
+  try {
+    const workspaceRoot = path.join(process.cwd(), 'workspace')
+    const userWorkspace = path.join(workspaceRoot, `user-${session.userId}`)
+    const filePath = path.join(userWorkspace, fileName)
+
+    // Security: validate file path is within user workspace
+    const realFilePath = await fs.realpath(filePath).catch(() => null)
+    if (!realFilePath || !realFilePath.startsWith(userWorkspace)) {
+      console.warn(`⚠️ Invalid file path attempt: ${fileName}`)
+      ws.send(JSON.stringify({
+        type: 'file_content',
+        data: { fileName, content: null, error: 'Invalid file path' }
+      }))
+      return
+    }
+
+    // Read file
+    const content = await fs.readFile(filePath, 'utf-8')
+    console.log(`📖 Fetched file: ${fileName} (${content.length} bytes)`)
+
+    ws.send(JSON.stringify({
+      type: 'file_content',
+      data: { fileName, content }
+    }))
+  } catch (error) {
+    console.error(`❌ Error fetching file ${fileName}:`, error)
+    ws.send(JSON.stringify({
+      type: 'file_content',
+      data: { fileName, content: null, error: 'File not found' }
+    }))
+  }
 }
 
 /**
@@ -232,6 +297,21 @@ async function handleUserMessage(ws: WebSocket, content: string) {
           content: agentMsg.content,
           data: agentMsg.data,
         }))
+
+        // Generate TTS for agent assistant messages (text responses)
+        if (agentMsg.type === 'assistant' && agentMsg.content) {
+          try {
+            const audioBuffer = await ttsService.synthesize(agentMsg.content)
+            ws.send(
+              JSON.stringify({
+                type: 'tts_audio',
+                data: audioBuffer.toString('base64'),
+              } as ServerMessage)
+            )
+          } catch (ttsError) {
+            console.error('⚠️  TTS error for agent response (continuing anyway):', ttsError)
+          }
+        }
 
         // Store session ID for conversation continuity
         if (agentMsg.data?.session_id) {

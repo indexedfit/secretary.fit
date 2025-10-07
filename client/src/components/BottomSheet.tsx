@@ -137,7 +137,7 @@ export function BottomSheet({
             alignItems: 'center',
           }}
         >
-          <h3 style={{ margin: 0, fontSize: '1.25rem' }}>{title}</h3>
+          <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#333' }}>{title}</h3>
           <button
             onClick={onClose}
             style={{
@@ -146,6 +146,7 @@ export function BottomSheet({
               fontSize: '1.5rem',
               cursor: 'pointer',
               padding: '4px 8px',
+              color: '#666',
             }}
           >
             ×

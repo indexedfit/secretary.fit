@@ -16,7 +16,6 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   groqApiKey: process.env.GROQ_API_KEY,
   elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
 }
 
 // Validate critical env vars

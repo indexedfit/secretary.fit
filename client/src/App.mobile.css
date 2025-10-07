@@ -196,39 +196,86 @@ body {
   }
 }
 
-/* Hide desktop sidebar on mobile */
-.desktop-sidebar {
+/* Mobile-only elements */
+.mobile-only {
+  display: block;
+}
+
+/* Desktop-only elements */
+.desktop-only {
+  display: none;
+}
+
+/* Hide text input on mobile */
+.text-input-area {
   display: none;
 }
 
 /* Responsive breakpoints */
 @media (min-width: 768px) {
+  /* Desktop layout: horizontal split */
   .app-container {
     flex-direction: row;
   }
 
+  .app-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 750px; /* voice control + sidebar */
+    z-index: 10;
+    background: #ffffff;
+  }
+
   .conversation-container {
     flex: 1;
+    padding-top: 80px; /* Account for fixed header */
+    padding-left: 32px;
+    padding-right: 32px;
   }
 
   .voice-control-container {
     border-top: none;
-    border-left: 1px solid #eee;
+    border-left: 1px solid #ddd;
     width: 350px;
+    max-width: 350px;
+    padding: 24px;
   }
 
   .file-peek {
-    display: none; /* Show sidebar on desktop */
+    display: none !important;
   }
 
+  .mobile-only {
+    display: none !important;
+  }
+
+  .desktop-only {
+    display: flex !important;
+  }
+
+  .text-input-area {
+    display: flex;
+  }
+
+  /* Desktop sidebar */
   .desktop-sidebar {
     display: flex !important;
+    border-left: 1px solid #ddd;
+  }
+
+  .message {
+    max-width: 80%;
   }
 }
 
 @media (min-width: 1024px) {
+  .app-header {
+    right: 750px; /* Voice control + sidebar */
+  }
+
   .voice-control-container {
-    width: 400px;
+    width: 350px;
   }
 
   .message {

@@ -35,6 +35,15 @@ function App() {
   const [agentStatus, setAgentStatus] = useState<string>('')
   const [transcribedText, setTranscribedText] = useState<string>('')
   const [isFileSheetOpen, setIsFileSheetOpen] = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
+  const [userId, setUserId] = useState<string>(() => {
+    // Get or create persistent user ID
+    const saved = localStorage.getItem('secretary-userId')
+    if (saved) return saved
+    const newId = crypto.randomUUID()
+    localStorage.setItem('secretary-userId', newId)
+    return newId
+  })
   const conversationEndRef = useRef<HTMLDivElement>(null)
 
   // Voice state machine
@@ -55,8 +64,29 @@ function App() {
     localStorage.setItem('secretary-files', JSON.stringify(files))
   }, [files])
 
+  // WebSocket URL: use env var in production, auto-detect in dev
+  const getWebSocketUrl = () => {
+    // If explicit URL set in env, use it (production)
+    if (import.meta.env.VITE_WS_URL) {
+      return import.meta.env.VITE_WS_URL
+    }
+
+    // Auto-detect for local dev: match client protocol (http->ws, https->wss)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.hostname
+    const url = `${protocol}//${host}:3001`
+
+    console.log(`🔌 WebSocket URL: ${url} (auto-detected from ${window.location.protocol})`)
+    return url
+  }
+
   const { sendMessage, sendBinary, isConnected } = useWebSocket({
-    url: 'ws://localhost:3001',
+    url: getWebSocketUrl(),
+    onConnect: () => {
+      // Send persistent user ID to server on connection
+      sendMessage({ type: 'identify', userId })
+      console.log(`📤 Sent user ID to server: ${userId}`)
+    },
     onMessage: (data) => {
       // Handle different message types
       if (data.type === 'system_init') {
@@ -110,7 +140,13 @@ function App() {
         // Whisper transcription result
         if (data.content) {
           setTranscribedText(data.content)
-          setMessage(data.content)
+          // Add transcription as a user message to conversation
+          setConversation(prev => [...prev, {
+            role: 'user',
+            content: data.content,
+            type: 'message'
+          }])
+          // Don't populate text input - voice mode is separate
           voiceState.startThinking()
           console.log('✅ Transcription:', data.content)
         }
@@ -125,14 +161,48 @@ function App() {
           for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i)
           }
-          playAudio(bytes.buffer)
+          console.log(`📥 Playing audio: ${bytes.buffer.byteLength} bytes`)
+          playAudio(bytes.buffer).catch(err => {
+            console.error('❌ Failed to play audio:', err)
+            voiceState.reset()
+            // On iOS, if autoplay fails, show a message
+            alert('Audio playback failed. Tap OK to try again.')
+          })
+        }
+      } else if (data.type === 'file_content') {
+        // Actual file content fetched from server
+        if (data.data?.fileName && data.data?.content) {
+          console.log(`📖 Received file content: ${data.data.fileName}`)
+          setFiles(prev => prev.map(f =>
+            f.name === data.data.fileName
+              ? { ...f, content: data.data.content }
+              : f
+          ))
         }
       }
     },
   })
 
   // Audio playback for server-generated TTS
-  const { playAudio, isPlaying: isSpeaking, getAnalyser, stop: stopAudio } = useAudioPlayback()
+  const { playAudio, isPlaying: isSpeaking, getAnalyser, stop: stopAudio, unlockAudio } = useAudioPlayback()
+
+  // Unlock audio on first user interaction (iOS Safari fix)
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      unlockAudio()
+      // Remove listeners after first interaction
+      document.removeEventListener('touchstart', handleFirstInteraction)
+      document.removeEventListener('click', handleFirstInteraction)
+    }
+
+    document.addEventListener('touchstart', handleFirstInteraction, { once: true })
+    document.addEventListener('click', handleFirstInteraction, { once: true })
+
+    return () => {
+      document.removeEventListener('touchstart', handleFirstInteraction)
+      document.removeEventListener('click', handleFirstInteraction)
+    }
+  }, [unlockAudio])
 
   // Update voice state when playback ends
   useEffect(() => {
@@ -144,10 +214,20 @@ function App() {
   // Whisper-based audio recording
   const { isRecording, startRecording, stopRecording } = useAudioRecording({
     onDataAvailable: (audioBlob) => {
+      console.log(`📤 Sending audio chunk: ${audioBlob.size} bytes`)
       sendBinary(audioBlob)
     },
-    chunkInterval: 100,
+    chunkInterval: 250, // Increase to 250ms for more reliable chunks
   })
+
+  const fetchFileContent = (file: FileInfo) => {
+    // Select the file immediately
+    setSelectedFile(file)
+
+    // Fetch actual content from server
+    sendMessage({ type: 'fetch_file', content: file.name })
+    console.log(`🔄 Fetching file content: ${file.name}`)
+  }
 
   const extractFileInfo = (content: string) => {
     if (!content) return
@@ -204,14 +284,20 @@ function App() {
       return
     }
 
-    // Use Whisper-based recording
-    if (isRecording) {
+    // Stop recording if currently recording
+    if (isRecording || voiceState.state === 'recording') {
+      console.log('Stopping recording...')
       stopRecording()
       voiceState.stopRecording()
       // Send end signal to trigger transcription
       sendMessage({ type: 'audio_end' })
-    } else if (voiceState.canRecord()) {
+      return
+    }
+
+    // Start recording if idle
+    if (voiceState.canRecord()) {
       setTranscribedText('')
+      console.log('Starting recording...')
       // Send start signal
       sendMessage({ type: 'audio_start' })
       startRecording()
@@ -324,7 +410,7 @@ function App() {
           <AudioVisualizer
             analyser={getAnalyser()}
             isActive={isSpeaking}
-            width={Math.min(window.innerWidth - 64, 400)}
+            width={Math.min(window.innerWidth - 64, 300)}
             height={80}
             barCount={40}
             barColor="#34C759"
@@ -343,16 +429,102 @@ function App() {
           <span>{voiceState.getStateLabel()}</span>
         </button>
 
-        {/* Status Info */}
-        <div style={{
-          fontSize: '0.75rem',
-          color: '#999',
-          textAlign: 'center'
+        {/* Transcript Toggle - Mobile Only */}
+        <div className="mobile-only" style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          alignItems: 'center'
         }}>
-          {transcribedText ? (
-            <div>Last: "{transcribedText}"</div>
-          ) : (
-            <div>Powered by Groq Whisper & ElevenLabs</div>
+          {transcribedText && (
+            <button
+              onClick={() => setShowTranscript(!showTranscript)}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.75rem',
+                background: 'transparent',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                color: '#666'
+              }}
+            >
+              {showTranscript ? '🙈 Hide' : '👁️ Show'} Transcript
+            </button>
+          )}
+          {showTranscript && transcribedText && (
+            <div style={{
+              fontSize: '0.75rem',
+              color: '#666',
+              padding: '8px 12px',
+              backgroundColor: '#f5f5f5',
+              borderRadius: '6px',
+              maxWidth: '100%',
+              wordWrap: 'break-word'
+            }}>
+              "{transcribedText}"
+            </div>
+          )}
+          {!transcribedText && (
+            <div style={{
+              fontSize: '0.75rem',
+              color: '#999',
+              textAlign: 'center'
+            }}>
+              Powered by Groq Whisper & ElevenLabs
+            </div>
+          )}
+        </div>
+
+        {/* Text Input - Desktop Only */}
+        <div className="text-input-area desktop-only" style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          marginTop: '12px'
+        }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="Type your message..."
+              style={{
+                flex: 1,
+                padding: '12px',
+                fontSize: '1rem',
+                border: '1px solid #ddd',
+                borderRadius: '8px'
+              }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!isConnected}
+              style={{
+                padding: '12px 24px',
+                fontSize: '1rem',
+                backgroundColor: '#007AFF',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              Send
+            </button>
+          </div>
+          {transcribedText && (
+            <div style={{
+              fontSize: '0.75rem',
+              color: '#666',
+              padding: '8px',
+              backgroundColor: '#f5f5f5',
+              borderRadius: '4px'
+            }}>
+              Last transcription: "{transcribedText}"
+            </div>
           )}
         </div>
       </div>
@@ -392,12 +564,12 @@ function App() {
             {files.map((file, idx) => (
               <div
                 key={idx}
-                onClick={() => setSelectedFile(file)}
+                onClick={() => fetchFileContent(file)}
                 style={{
                   padding: '16px',
                   marginBottom: '12px',
                   backgroundColor: selectedFile?.name === file.name ? '#007AFF' : '#f5f5f5',
-                  color: selectedFile?.name === file.name ? 'white' : '#000',
+                  color: selectedFile?.name === file.name ? 'white' : '#333',
                   borderRadius: '12px',
                   cursor: 'pointer',
                   transition: 'all 0.2s'
@@ -417,7 +589,8 @@ function App() {
                     fontSize: '0.875rem',
                     overflow: 'auto',
                     whiteSpace: 'pre-wrap',
-                    wordWrap: 'break-word'
+                    wordWrap: 'break-word',
+                    color: 'white'
                   }}>
                     {file.content}
                   </pre>
@@ -435,21 +608,24 @@ function App() {
       </BottomSheet>
 
       {/* Desktop Sidebar (hidden on mobile) */}
-      <div style={{
-        width: '400px',
-        borderLeft: '1px solid #ccc',
-        backgroundColor: '#f5f5f5',
-        display: 'flex',
-        flexDirection: 'column'
-      }}
+      <div
         className="desktop-sidebar"
+        style={{
+          width: '400px',
+          borderLeft: '1px solid #ccc',
+          backgroundColor: '#f5f5f5',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}
       >
         <div style={{
-          padding: '1rem',
+          padding: '16px',
           borderBottom: '1px solid #ccc',
-          backgroundColor: '#ffffff'
+          backgroundColor: '#ffffff',
+          flexShrink: 0
         }}>
-          <h3 style={{ margin: 0 }}>📁 Workspace</h3>
+          <h3 style={{ margin: 0, color: '#333' }}>📁 Workspace</h3>
           <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
             Files created by Agent
           </div>
@@ -485,7 +661,7 @@ function App() {
               {files.map((file, idx) => (
                 <div
                   key={idx}
-                  onClick={() => setSelectedFile(file)}
+                  onClick={() => fetchFileContent(file)}
                   style={{
                     padding: '0.75rem',
                     marginBottom: '0.5rem',
@@ -496,7 +672,7 @@ function App() {
                     transition: 'all 0.2s'
                   }}
                 >
-                  <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>
+                  <div style={{ fontWeight: 500, marginBottom: '0.25rem', color: '#333' }}>
                     📄 {file.name}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#666' }}>
@@ -526,7 +702,8 @@ function App() {
               fontWeight: 500,
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
+              color: '#333'
             }}>
               <span>📄 {selectedFile.name}</span>
               <button
@@ -536,7 +713,8 @@ function App() {
                   border: 'none',
                   fontSize: '1.25rem',
                   cursor: 'pointer',
-                  padding: '0 0.5rem'
+                  padding: '0 0.5rem',
+                  color: '#666'
                 }}
               >
                 ×
@@ -550,6 +728,7 @@ function App() {
               fontSize: '0.875rem',
               fontFamily: 'Monaco, Consolas, "Courier New", monospace',
               backgroundColor: '#f8f8f8',
+              color: '#222',
               whiteSpace: 'pre-wrap',
               wordWrap: 'break-word'
             }}>
