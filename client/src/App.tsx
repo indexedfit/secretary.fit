@@ -36,14 +36,16 @@ function App() {
   const [transcribedText, setTranscribedText] = useState<string>('')
   const [isFileSheetOpen, setIsFileSheetOpen] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
-  const [userId, setUserId] = useState<string>(() => {
-    // Get or create persistent user ID
+
+  // Get or create persistent user ID (never changes)
+  const userId = (() => {
     const saved = localStorage.getItem('secretary-userId')
     if (saved) return saved
     const newId = crypto.randomUUID()
     localStorage.setItem('secretary-userId', newId)
     return newId
-  })
+  })()
+
   const conversationEndRef = useRef<HTMLDivElement>(null)
 
   // Voice state machine
