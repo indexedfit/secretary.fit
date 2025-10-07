@@ -85,6 +85,36 @@ The server is a WebSocket-based service that routes messages to different AI pro
 - GROQ is used for fast responses
 - Claude can be used for more complex reasoning
 
+## AI Agent Architecture
+
+### Dual-Agent Approach
+The system uses two AI agents working together:
+
+**GROQ (Fast Intermediary)**
+- Provides immediate, conversational acknowledgments
+- Natural, warm responses that feel human
+- Bridges the gap between voice input and background processing
+- Example tone: "Let me take a look at those documents for you..."
+
+**Claude Agent SDK (Deep Processing)**
+- Handles actual file operations and complex tasks
+- Built-in bash, file operations, and code execution tools
+- User-specific workspace sandboxing
+- Takes time to plan and execute properly - that's the feature, not a bug
+
+**Message Flow:**
+1. User speaks → Speech-to-text
+2. GROQ immediately responds conversationally
+3. Claude Agent SDK processes in background
+4. Progress updates streamed back to user
+5. Text-to-speech delivers responses
+
+### User Sandboxing
+- Each user gets isolated folder: `/workspace/user-{id}/`
+- Agent SDK scoped to user's directory only
+- Path validation prevents directory traversal
+- Conversation history maintained per user
+
 ## Environment Configuration
 
 Required environment variables (see `.env.example`):
