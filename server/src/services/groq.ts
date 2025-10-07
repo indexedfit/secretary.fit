@@ -1,3 +1,5 @@
+// Load env FIRST
+import '../config/env.js'
 import Groq from 'groq-sdk'
 
 class GroqService {

@@ -1,4 +1,5 @@
-import 'dotenv/config'
+// Load env vars FIRST before any other imports
+import './config/env.js'
 import { WebSocketServer } from 'ws'
 import { handleConnection } from './handlers/websocket.js'
 

@@ -43,3 +43,6 @@ coverage/
 .cache/
 temp/
 tmp/
+
+# Server workspace (user sandboxes)
+workspace/

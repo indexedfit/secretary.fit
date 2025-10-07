@@ -156,3 +156,132 @@ Edit `server/src/handlers/websocket.ts:39` to change the `useGroq` flag.
 ### Modifying Conversation Context
 - Claude: Edit `server/src/services/claude.ts` (adjust history length, model, max_tokens)
 - GROQ: Edit `server/src/services/groq.ts` (adjust system prompt, model, temperature)
+
+## Implementation Roadmap
+
+### Current Status (Phase 0)
+✅ Monorepo structure with client and server
+✅ React client with TTS/STT hooks
+✅ WebSocket server infrastructure
+✅ GROQ integration for fast responses
+✅ Claude Agent SDK integrated with user sandboxing
+✅ User session management (UUID per connection)
+✅ Workspace isolation (`/workspace/user-{id}/`)
+
+### Phase 1: Dual-Agent Flow (In Progress)
+**Goal:** Implement the full dual-agent architecture where GROQ provides immediate acknowledgment while Claude Agent processes in background.
+
+**Tasks:**
+1. **Streaming Agent Responses**
+   - Uncomment agent streaming code in `server/src/handlers/websocket.ts:81-96`
+   - Test Agent SDK streaming with simple file operations
+   - Handle session ID persistence for conversation continuity
+
+2. **Client UI Updates**
+   - Add separate UI sections for GROQ (instant) vs Agent (processing) responses
+   - Display "Processing..." indicator when Agent is working
+   - Stream Agent progress updates to UI
+   - Handle multiple concurrent message types
+
+3. **Message Type Expansion**
+   - Add `agent_progress`, `agent_tool_use`, `agent_complete` message types
+   - Update `types/messages.ts` with new message schemas
+   - Client-side handlers for each Agent event type
+
+4. **Testing & Validation**
+   - Test with simple tasks: "create a file", "read a file", "run a bash command"
+   - Verify workspace isolation between users
+   - Confirm session persistence across multiple messages
+
+### Phase 2: Enhanced Agent Capabilities
+**Goal:** Expand what the Agent can do and improve user experience.
+
+**Tasks:**
+1. **Expand Tool Access**
+   - Add more tools: `WebSearch`, `WebFetch`, `Task` (subagents)
+   - Configure MCP servers if needed for external integrations
+   - Fine-tune tool permissions per use case
+
+2. **Conversation Context Management**
+   - Implement session resume functionality
+   - Save conversation history to disk per user
+   - Add session listing/management endpoints
+
+3. **Voice Experience Refinement**
+   - Optimize GROQ responses for voice (shorter, more natural)
+   - Implement interrupt/cancel for long Agent operations
+   - Add voice controls (pause, resume, stop)
+   - Selective TTS for different message types
+
+4. **Security & Resource Management**
+   - Add workspace size limits per user
+   - Implement request rate limiting
+   - Add timeout controls for Agent operations
+   - Audit logging for file operations
+
+### Phase 3: Production Readiness
+**Goal:** Make the system production-ready with proper monitoring and scale.
+
+**Tasks:**
+1. **Error Handling & Recovery**
+   - Graceful Agent failures with user-friendly messages
+   - Auto-retry for transient errors
+   - Fallback to GROQ if Agent fails
+
+2. **Monitoring & Observability**
+   - Add metrics: response times, token usage, costs
+   - Agent operation logging and tracing
+   - Health check endpoints
+   - Usage analytics dashboard
+
+3. **Performance Optimization**
+   - Implement prompt caching for Agent SDK
+   - Optimize workspace file I/O
+   - WebSocket connection pooling
+   - Client-side caching for common responses
+
+4. **User Management**
+   - Persistent user accounts (vs session-based UUIDs)
+   - User preferences (voice settings, agent behavior)
+   - Workspace persistence across sessions
+   - Multi-device sync
+
+### Phase 4: Advanced Features
+**Goal:** Add sophisticated capabilities that differentiate the product.
+
+**Tasks:**
+1. **Multi-Modal Support**
+   - Image/screenshot analysis via Agent
+   - PDF document processing
+   - Code execution and debugging
+
+2. **Collaborative Features**
+   - Shared workspaces between users
+   - Real-time collaboration on Agent tasks
+   - Team-level conversation history
+
+3. **Custom Agent Behaviors**
+   - User-configurable system prompts
+   - Custom subagents for specific workflows
+   - Agent personality customization
+   - Task templates and shortcuts
+
+4. **Integration Ecosystem**
+   - GitHub integration for code operations
+   - Calendar/email via MCP servers
+   - Custom MCP server marketplace
+   - API for third-party integrations
+
+### Next Immediate Steps
+1. **Test current setup:** Run `npm run dev` and verify both servers start
+2. **Simple Agent test:** Uncomment streaming code and test with "create a file named test.txt"
+3. **Client streaming UI:** Add visual feedback for Agent processing states
+4. **Documentation:** Document Agent message flow with examples
+
+### Technical Debt & Future Considerations
+- Replace WeakMap session storage with Redis for multi-server scaling
+- Implement proper authentication (OAuth, JWT)
+- Add TypeScript strict mode compliance
+- Unit tests for Agent message processing
+- E2E tests for dual-agent flow
+- Consider server-side rendering for better SEO
