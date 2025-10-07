@@ -186,36 +186,238 @@ Edit `server/src/handlers/websocket.ts:39` to change the `useGroq` flag.
 ✅ Complex queries: 3-5s (GROQ + Agent)
 ✅ Cost optimized: 30x cheaper for simple questions
 
-### Phase 2: Voice Integration (Starting Now! 🎤)
-**Goal:** Replace browser APIs with production-quality voice using Groq Whisper Turbo (STT) and Kokoro TTS.
+### Phase 2: Voice Integration ✅ COMPLETE!
+**Goal:** Replace browser APIs with production-quality voice.
 
-**See `VOICE_INTEGRATION_PLAN.md` for complete details.**
+**Completed:**
+- ✅ Groq Whisper Turbo for STT (real-time transcription)
+- ✅ ElevenLabs TTS for high-quality voice
+- ✅ WebSocket binary audio streaming
+- ✅ Click-to-record interface
+- ✅ Auto-scroll conversation
+- ✅ File detection and viewing
 
-**Tasks:**
-1. **Speech-to-Text (Groq Whisper)**
-   - Stream audio chunks from browser via WebSocket
-   - Integrate Groq Whisper Turbo API
-   - Real-time transcription display
-   - Voice Activity Detection (auto-start on speech)
+**What Works Now:**
+- 🎙️ Click Record → Speak → Click Stop
+- 📝 Whisper transcribes speech
+- 💬 GROQ responds immediately
+- 🔊 ElevenLabs speaks response
+- 📁 Files auto-detected and viewable in sidebar
 
-2. **Text-to-Speech (Kokoro)**
-   - Set up Kokoro TTS (local or API)
-   - Stream audio back to client
-   - Web Audio API playback
-   - Natural, high-quality voice
+### Phase 3: Voice-to-Voice Mode (Mobile-First UX) 🎯 NEXT!
+**Goal:** Create a seamless voice conversation experience optimized for mobile.
 
-3. **UX Enhancements**
-   - Animated speech bubble during playback
-   - Click-to-interrupt support
-   - Waveform visualization
-   - Voice settings (speed, voice selection)
+**Design Philosophy:**
+- **Mobile-first**: Touch-friendly, works great on phones
+- **One-tap interaction**: Click to send, click to interrupt
+- **Visual feedback**: Always show what's happening
+- **Continuous flow**: Voice → Response → Voice (like a real conversation)
 
-4. **Testing**
-   - Measure end-to-end latency
-   - Test on different networks
-   - Mobile browser compatibility
+**Architecture:**
 
-### Phase 2: Enhanced Agent Capabilities
+```
+┌─────────────────────────────────────┐
+│  Mobile-Optimized Voice Interface   │
+├─────────────────────────────────────┤
+│                                     │
+│  ┌───────────────────────────┐     │
+│  │   Audio Visualizer        │     │
+│  │   (Winamp-style waveform) │     │
+│  │   🎵🎵🎵🎵🎵🎵🎵           │     │
+│  └───────────────────────────┘     │
+│                                     │
+│  ┌───────────────────────────┐     │
+│  │  Status: Recording...      │     │
+│  │  or: AI is thinking...     │     │
+│  │  or: AI is speaking...     │     │
+│  └───────────────────────────┘     │
+│                                     │
+│  ┌───────────────────────────┐     │
+│  │   🎤 TAP TO SEND          │     │ ← While recording
+│  │   or                       │     │
+│  │   ⏸️  TAP TO INTERRUPT    │     │ ← While AI speaking
+│  └───────────────────────────┘     │
+│                                     │
+│  ┌───────────────────────────┐     │
+│  │  Tool Progress Indicators  │     │
+│  │  ✏️ Writing file...        │     │
+│  │  📖 Reading document...    │     │
+│  └───────────────────────────┘     │
+│                                     │
+│  ┌───────────────────────────┐     │
+│  │  File Viewer (Swipeable)   │     │
+│  │  📄 test.txt               │     │
+│  │  📄 script.py              │     │
+│  └───────────────────────────┘     │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**Implementation Tasks:**
+
+**3.1: Mobile-First UI Redesign**
+- [ ] Single-column layout (no sidebar on mobile)
+- [ ] Bottom sheet for file viewer (swipe up to expand)
+- [ ] Large touch targets (min 44px)
+- [ ] Responsive breakpoints (mobile/tablet/desktop)
+- [ ] Remove text input on mobile (voice-only mode)
+- [ ] Fullscreen voice interface option
+
+**3.2: Winamp-Style Audio Visualizer**
+- [ ] Real-time waveform during recording (using Web Audio API analyzer)
+- [ ] Animated bars during AI speech playback
+- [ ] Color-coded: Blue (recording), Green (AI speaking), Gray (idle)
+- [ ] Smooth animations (60fps)
+- [ ] Component: `<AudioVisualizer />`
+
+**3.3: Smart State Machine**
+```typescript
+States:
+- IDLE: Show "Tap to Record" button
+- RECORDING: Show waveform + "Tap to Send"
+- PROCESSING: Show "Thinking..." spinner
+- SPEAKING: Show waveform + "Tap to Interrupt"
+- AGENT_WORKING: Show tool indicators (Read, Write, Bash, etc.)
+```
+
+**3.4: Click-to-Send / Click-to-Interrupt**
+- [ ] State-aware button:
+  - IDLE → Click starts recording
+  - RECORDING → Click sends & stops
+  - SPEAKING → Click interrupts & stops audio
+  - AGENT_WORKING → Click cancels agent (if possible)
+- [ ] Haptic feedback on mobile (vibrate)
+- [ ] Visual state transitions (color changes)
+
+**3.5: Enhanced Agent SDK Integration**
+- [ ] Expose more tools: `WebSearch`, `WebFetch`, `Task` (subagents)
+- [ ] Real-time tool progress streaming
+- [ ] Better error handling & recovery
+- [ ] Tool usage visualization (show what agent is doing)
+- [ ] Interrupt/cancel agent operations
+
+**3.6: Progress Indicators**
+- [ ] Tool icons with labels (✏️ Writing, 📖 Reading, ⚙️ Running, 🔍 Searching)
+- [ ] Progress bar for long operations
+- [ ] Estimated time remaining (if available)
+- [ ] Queue indicator (if multiple tools)
+
+**3.7: File Management**
+- [ ] Swipeable bottom sheet for files
+- [ ] Tap file to expand/preview
+- [ ] Syntax highlighting for code
+- [ ] Download button for files
+- [ ] Delete file option
+- [ ] File thumbnails (for images)
+
+**3.8: Mobile Optimizations**
+- [ ] Service Worker for offline support
+- [ ] PWA manifest (add to home screen)
+- [ ] Handle screen wake lock during recording
+- [ ] Optimize for low-bandwidth (compress audio)
+- [ ] Battery optimization (suspend when backgrounded)
+- [ ] Handle interruptions (phone calls, notifications)
+
+**3.9: Voice Activity Detection (VAD)**
+- [ ] Auto-detect when user stops speaking
+- [ ] Configurable silence threshold (e.g., 1.5s of silence = auto-send)
+- [ ] Toggle for manual vs. auto-send
+- [ ] Visual indicator for VAD (listening indicator)
+
+**3.10: Settings Panel**
+- [ ] Voice selection (ElevenLabs voices)
+- [ ] Speed control (0.75x - 1.5x)
+- [ ] Auto-send timeout
+- [ ] Enable/disable file auto-detection
+- [ ] Theme (light/dark)
+- [ ] Advanced: Show text transcript toggle
+
+**Technical Implementation Details:**
+
+**Audio Visualizer Component:**
+```typescript
+// client/src/components/AudioVisualizer.tsx
+const AudioVisualizer = ({
+  isRecording,
+  isSpeaking,
+  audioStream
+}) => {
+  // Use Web Audio API AnalyserNode
+  // Draw canvas with requestAnimationFrame
+  // 32 bars, update 60fps
+  // Color: recording=#3B82F6, speaking=#10B981
+}
+```
+
+**State Machine:**
+```typescript
+// client/src/hooks/useVoiceState.ts
+type VoiceState =
+  | 'idle'
+  | 'recording'
+  | 'processing'
+  | 'speaking'
+  | 'agent_working'
+
+const useVoiceState = () => {
+  const [state, setState] = useState<VoiceState>('idle')
+
+  const handleTap = () => {
+    switch(state) {
+      case 'idle': startRecording(); break;
+      case 'recording': sendAudio(); break;
+      case 'speaking': interrupt(); break;
+      case 'agent_working': cancelAgent(); break;
+    }
+  }
+
+  return { state, handleTap, buttonLabel, buttonColor }
+}
+```
+
+**Mobile Layout:**
+```css
+/* Mobile-first breakpoints */
+@media (max-width: 768px) {
+  /* Single column, no sidebar */
+  /* Bottom sheet for files */
+  /* Fullscreen voice UI */
+}
+
+@media (min-width: 769px) {
+  /* Tablet: Side-by-side with collapsible sidebar */
+}
+
+@media (min-width: 1024px) {
+  /* Desktop: Current layout (chat + sidebar) */
+}
+```
+
+**Agent Tool Access:**
+```typescript
+// Expand tools available to Agent SDK
+const agentOptions = {
+  tools: [
+    'Read', 'Write', 'Edit', 'Bash',
+    'WebSearch', 'WebFetch', 'Glob', 'Grep',
+    'Task' // For spawning subagents
+  ],
+  timeout: 60000, // 1min max
+  onProgress: (tool, status) => {
+    // Stream progress to UI
+  }
+}
+```
+
+**Next Immediate Steps:**
+1. Create AudioVisualizer component
+2. Implement voice state machine
+3. Add mobile-first CSS with breakpoints
+4. Build bottom sheet file viewer
+5. Add click-to-interrupt logic
+6. Test on mobile device (iPhone/Android)
+
+### Phase 4: Enhanced Agent Capabilities
 **Goal:** Expand what the Agent can do and improve user experience.
 
 **Tasks:**
@@ -294,16 +496,16 @@ Edit `server/src/handlers/websocket.ts:39` to change the `useGroq` flag.
    - Custom MCP server marketplace
    - API for third-party integrations
 
-### Next Immediate Steps (Phase 2)
-1. ✅ **Platform ready** - All core features working
-2. ✅ **File operations tested** - Create, view, persist all working
-3. **START Voice Integration:**
-   - Week 1: Groq Whisper STT setup
-   - Week 2: Kokoro TTS setup
-   - Week 3: UX polish (speech bubbles, interruption)
-   - Week 4: Testing and optimization
-
-See `VOICE_INTEGRATION_PLAN.md` for detailed roadmap.
+### Next Immediate Steps (Phase 3 - Voice-to-Voice)
+1. ✅ **Voice pipeline working** - STT + GROQ + TTS fully operational
+2. ✅ **File viewing** - Sidebar shows created files
+3. **START Mobile-First Voice UX:**
+   - Day 1-2: Audio visualizer component (Winamp-style)
+   - Day 3-4: Voice state machine + click-to-interrupt
+   - Day 5-6: Mobile-responsive layout + bottom sheet
+   - Day 7: Test on real mobile devices
+   - Day 8-9: Agent tool progress indicators
+   - Day 10: Voice Activity Detection (auto-send)
 
 ### Technical Debt & Future Considerations
 - Replace WeakMap session storage with Redis for multi-server scaling
