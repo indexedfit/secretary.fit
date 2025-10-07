@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAudioRecording } from './hooks/useAudioRecording'
 import { useAudioPlayback } from './hooks/useAudioPlayback'
+import { useVoiceState } from './hooks/useVoiceState'
+import { AudioVisualizer } from './components/AudioVisualizer'
+import { BottomSheet } from './components/BottomSheet'
+import './App.mobile.css'
 
 interface Message {
   role: 'user' | 'assistant' | 'agent'
@@ -30,7 +34,11 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
   const [agentStatus, setAgentStatus] = useState<string>('')
   const [transcribedText, setTranscribedText] = useState<string>('')
+  const [isFileSheetOpen, setIsFileSheetOpen] = useState(false)
   const conversationEndRef = useRef<HTMLDivElement>(null)
+
+  // Voice state machine
+  const voiceState = useVoiceState()
 
   // Save conversation to localStorage whenever it changes
   useEffect(() => {
@@ -58,6 +66,7 @@ function App() {
         // GROQ's immediate response
         if (data.content && data.content.trim()) {
           console.log(`📨 GROQ response received`)
+          voiceState.startThinking()
           setConversation(prev => [...prev, {
             role: 'assistant',
             content: data.content,
@@ -68,6 +77,7 @@ function App() {
       } else if (data.type === 'agent_assistant') {
         // Show tool uses as progress indicators
         if (data.data?.tool_uses && data.data.tool_uses.length > 0) {
+          voiceState.startAgentWork()
           const toolNames = data.data.tool_uses.map((t: any) => {
             const icon =
               t.name === 'Write' ? '✏️' :
@@ -93,6 +103,7 @@ function App() {
             type: 'agent_result'
           }])
           setAgentStatus('')
+          voiceState.reset()
           extractFileInfo(data.content)
         }
       } else if (data.type === 'transcription') {
@@ -100,12 +111,14 @@ function App() {
         if (data.content) {
           setTranscribedText(data.content)
           setMessage(data.content)
+          voiceState.startThinking()
           console.log('✅ Transcription:', data.content)
         }
       } else if (data.type === 'tts_audio') {
         // Server-generated TTS audio - comes as base64
         if (data.data) {
           console.log('🔊 Received TTS audio, playing...')
+          voiceState.startSpeaking()
           // Convert base64 to ArrayBuffer
           const binaryString = atob(data.data)
           const bytes = new Uint8Array(binaryString.length)
@@ -119,7 +132,14 @@ function App() {
   })
 
   // Audio playback for server-generated TTS
-  const { playAudio, isPlaying: isSpeaking } = useAudioPlayback()
+  const { playAudio, isPlaying: isSpeaking, getAnalyser, stop: stopAudio } = useAudioPlayback()
+
+  // Update voice state when playback ends
+  useEffect(() => {
+    if (!isSpeaking && voiceState.state === 'speaking') {
+      voiceState.reset()
+    }
+  }, [isSpeaking, voiceState])
 
   // Whisper-based audio recording
   const { isRecording, startRecording, stopRecording } = useAudioRecording({
@@ -177,16 +197,25 @@ function App() {
   }
 
   const handleVoiceInput = () => {
+    // Handle interruption during speaking or agent work
+    if (voiceState.canInterrupt()) {
+      stopAudio()
+      voiceState.reset()
+      return
+    }
+
     // Use Whisper-based recording
     if (isRecording) {
       stopRecording()
+      voiceState.stopRecording()
       // Send end signal to trigger transcription
       sendMessage({ type: 'audio_end' })
-    } else {
+    } else if (voiceState.canRecord()) {
       setTranscribedText('')
       // Send start signal
       sendMessage({ type: 'audio_start' })
       startRecording()
+      voiceState.startRecording()
     }
   }
 
@@ -201,176 +230,220 @@ function App() {
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      height: '100vh',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    }}>
-      {/* Main Chat Area */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '2rem' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <h1 style={{ margin: 0 }}>secretary.fit</h1>
-            <button
-              onClick={handleClearAll}
-              style={{
-                padding: '0.5rem 1rem',
-                fontSize: '0.75rem',
-                backgroundColor: '#f44336',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
-            >
-              🗑️ Clear All
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              fontSize: '0.875rem'
-            }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: isConnected ? '#4CAF50' : '#f44336',
-                marginRight: '0.5rem',
-                display: 'inline-block'
-              }}></span>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-            {agentStatus && (
-              <span style={{
-                fontSize: '0.875rem',
-                color: '#4CAF50',
-                fontWeight: 500
-              }}>
-                🤖 {agentStatus}
-              </span>
-            )}
-            {conversation.length > 0 && (
-              <span style={{
-                fontSize: '0.75rem',
-                color: '#999'
-              }}>
-                💾 Auto-saved
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Conversation */}
-        <div style={{
-          flex: 1,
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-          padding: '1rem',
-          marginBottom: '1rem',
-          overflowY: 'auto',
-          backgroundColor: '#fafafa'
-        }}>
-          {conversation.map((msg, idx) => (
-            <div key={idx} style={{
-              marginBottom: '1rem',
-              padding: '0.75rem',
-              backgroundColor:
-                msg.role === 'user' ? '#e3f2fd' :
-                msg.role === 'agent' ? '#e8f5e9' :
-                '#ffffff',
+    <div className="app-container">
+      {/* Header */}
+      <div className="app-header">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 className="app-title">secretary.fit</h1>
+          <button
+            onClick={handleClearAll}
+            style={{
+              padding: '8px 12px',
+              fontSize: '0.75rem',
+              backgroundColor: '#FF3B30',
+              color: 'white',
+              border: 'none',
               borderRadius: '8px',
-              borderLeft: msg.role === 'agent' ? '4px solid #4CAF50' :
-                          msg.role === 'user' ? '4px solid #2196F3' : 'none',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-            }}>
-              <div style={{
-                fontSize: '0.75rem',
-                color: '#666',
-                marginBottom: '0.25rem',
-                fontWeight: 500,
-                textTransform: 'uppercase'
-              }}>
-                {msg.role === 'user' ? '👤 You' :
-                 msg.role === 'agent' ? '🤖 Agent' :
-                 '💬 Assistant'}
-                {msg.type === 'agent_result' && ' • Final Result'}
-              </div>
-              <div>{msg.content}</div>
-            </div>
-          ))}
-          <div ref={conversationEndRef} />
+              cursor: 'pointer',
+              fontWeight: 500
+            }}
+          >
+            🗑️ Clear
+          </button>
         </div>
-
-        {/* Input Area */}
-        <div>
-          {isRecording && (
-            <div style={{
-              marginBottom: '0.5rem',
-              padding: '0.5rem',
-              backgroundColor: '#fff3cd',
-              borderRadius: '4px',
-              fontSize: '0.875rem'
-            }}>
-              🎤 Recording (Whisper)...
-            </div>
+        <div className="status-bar">
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              backgroundColor: isConnected ? '#34C759' : '#FF3B30',
+            }}></span>
+            {isConnected ? 'Connected' : 'Disconnected'}
+          </span>
+          {conversation.length > 0 && (
+            <span style={{ color: '#999', fontSize: '0.75rem' }}>
+              💾 Auto-saved
+            </span>
           )}
-
-          {isSpeaking && (
-            <div style={{
-              marginBottom: '0.5rem',
-              padding: '0.5rem',
-              backgroundColor: '#d1ecf1',
-              borderRadius: '4px',
-              fontSize: '0.875rem'
-            }}>
-              🔊 Speaking...
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Type your message..."
-              style={{ flex: 1, padding: '0.75rem', fontSize: '1rem' }}
-            />
-            <button onClick={handleSend} disabled={!isConnected}>
-              Send
-            </button>
-            <button
-              onClick={handleVoiceInput}
-              style={{
-                backgroundColor: isRecording ? '#f44336' : '#4CAF50',
-                color: 'white',
-                minWidth: '100px'
-              }}
-            >
-              {isRecording ? '🎤 Stop' : '🎙️ Record'}
-            </button>
-          </div>
-
-          <div style={{
-            marginTop: '0.5rem',
-            fontSize: '0.75rem',
-            color: '#666'
-          }}>
-            🎙️ Whisper STT (Groq) | Last transcription: {transcribedText || 'None'}
-          </div>
         </div>
       </div>
 
-      {/* Workspace Sidebar */}
+      {/* Agent Status (floating) */}
+      {agentStatus && (
+        <div className="agent-status">
+          🤖 {agentStatus}
+        </div>
+      )}
+
+      {/* Conversation */}
+      <div className="conversation-container">
+        {conversation.length === 0 ? (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            color: '#999',
+            textAlign: 'center',
+            padding: '20px'
+          }}>
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🎙️</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 500, marginBottom: '8px' }}>
+              Welcome to secretary.fit
+            </div>
+            <div style={{ fontSize: '0.875rem' }}>
+              Tap the button below to start speaking
+            </div>
+          </div>
+        ) : (
+          <>
+            {conversation.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`message message-${msg.role}`}
+                style={{
+                  display: msg.role === 'user' ? 'block' : 'flex',
+                  marginLeft: msg.role === 'user' ? 'auto' : '0',
+                  marginRight: msg.role === 'user' ? '0' : 'auto',
+                }}
+              >
+                {msg.content}
+              </div>
+            ))}
+            <div ref={conversationEndRef} />
+          </>
+        )}
+      </div>
+
+      {/* Voice Control */}
+      <div className="voice-control-container">
+        {/* Audio Visualizer */}
+        <div className="visualizer-wrapper">
+          <AudioVisualizer
+            analyser={getAnalyser()}
+            isActive={isSpeaking}
+            width={Math.min(window.innerWidth - 64, 400)}
+            height={80}
+            barCount={40}
+            barColor="#34C759"
+          />
+        </div>
+
+        {/* Voice Button */}
+        <button
+          onClick={handleVoiceInput}
+          className="voice-button"
+          style={{
+            backgroundColor: voiceState.getStateColor(),
+          }}
+        >
+          <span style={{ fontSize: '1.5rem' }}>{voiceState.getStateIcon()}</span>
+          <span>{voiceState.getStateLabel()}</span>
+        </button>
+
+        {/* Status Info */}
+        <div style={{
+          fontSize: '0.75rem',
+          color: '#999',
+          textAlign: 'center'
+        }}>
+          {transcribedText ? (
+            <div>Last: "{transcribedText}"</div>
+          ) : (
+            <div>Powered by Groq Whisper & ElevenLabs</div>
+          )}
+        </div>
+      </div>
+
+      {/* File Peek Button (Mobile) */}
+      {files.length > 0 && (
+        <div
+          className="file-peek"
+          onClick={() => setIsFileSheetOpen(true)}
+        >
+          📁
+          <div className="file-badge">{files.length}</div>
+        </div>
+      )}
+
+      {/* Bottom Sheet for Files */}
+      <BottomSheet
+        isOpen={isFileSheetOpen}
+        onClose={() => setIsFileSheetOpen(false)}
+        title="📁 Workspace Files"
+        snapPoints={[40, 70, 90]}
+      >
+        {files.length === 0 ? (
+          <div style={{
+            textAlign: 'center',
+            color: '#999',
+            padding: '40px 20px'
+          }}>
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📂</div>
+            <div>No files yet</div>
+            <div style={{ fontSize: '0.875rem', marginTop: '8px' }}>
+              Try saying: "create a file named test.txt"
+            </div>
+          </div>
+        ) : (
+          <div>
+            {files.map((file, idx) => (
+              <div
+                key={idx}
+                onClick={() => setSelectedFile(file)}
+                style={{
+                  padding: '16px',
+                  marginBottom: '12px',
+                  backgroundColor: selectedFile?.name === file.name ? '#007AFF' : '#f5f5f5',
+                  color: selectedFile?.name === file.name ? 'white' : '#000',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📄</span>
+                  <span>{file.name}</span>
+                </div>
+                {selectedFile?.name === file.name ? (
+                  <pre style={{
+                    margin: 0,
+                    marginTop: '12px',
+                    padding: '12px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word'
+                  }}>
+                    {file.content}
+                  </pre>
+                ) : (
+                  <div style={{ fontSize: '0.875rem', opacity: 0.8 }}>
+                    {file.content.length > 50
+                      ? file.content.substring(0, 50) + '...'
+                      : file.content}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* Desktop Sidebar (hidden on mobile) */}
       <div style={{
         width: '400px',
         borderLeft: '1px solid #ccc',
         backgroundColor: '#f5f5f5',
         display: 'flex',
         flexDirection: 'column'
-      }}>
+      }}
+        className="desktop-sidebar"
+      >
         <div style={{
           padding: '1rem',
           borderBottom: '1px solid #ccc',

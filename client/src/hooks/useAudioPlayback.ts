@@ -5,6 +5,7 @@ export function useAudioPlayback() {
   const [isSupported, setIsSupported] = useState(true)
   const audioContextRef = useRef<AudioContext | null>(null)
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
 
   /**
    * Initialize AudioContext (must be done after user interaction)
@@ -13,6 +14,11 @@ export function useAudioPlayback() {
     if (!audioContextRef.current) {
       try {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+
+        // Create analyser node for visualization
+        analyserRef.current = audioContextRef.current.createAnalyser()
+        analyserRef.current.fftSize = 256
+        analyserRef.current.smoothingTimeConstant = 0.8
       } catch (error) {
         console.error('Failed to initialize AudioContext:', error)
         setIsSupported(false)
@@ -46,7 +52,14 @@ export function useAudioPlayback() {
       // Create and configure source
       const source = audioContextRef.current.createBufferSource()
       source.buffer = audioBuffer
-      source.connect(audioContextRef.current.destination)
+
+      // Connect through analyser for visualization
+      if (analyserRef.current) {
+        source.connect(analyserRef.current)
+        analyserRef.current.connect(audioContextRef.current.destination)
+      } else {
+        source.connect(audioContextRef.current.destination)
+      }
 
       // Track when playback ends
       source.onended = () => {
@@ -101,6 +114,20 @@ export function useAudioPlayback() {
     }
   }, [stop])
 
+  /**
+   * Get audio context for visualization
+   */
+  const getAudioContext = useCallback(() => {
+    return audioContextRef.current
+  }, [])
+
+  /**
+   * Get analyser node for visualization
+   */
+  const getAnalyser = useCallback(() => {
+    return analyserRef.current
+  }, [])
+
   return {
     isPlaying,
     isSupported,
@@ -108,5 +135,7 @@ export function useAudioPlayback() {
     playBlob,
     stop,
     cleanup,
+    getAudioContext,
+    getAnalyser,
   }
 }
